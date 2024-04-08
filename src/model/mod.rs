@@ -8,6 +8,7 @@ use std::{
     usize,
 };
 
+use egui::accesskit::VerticalOffset;
 use log::{error, info};
 use std::collections::hash_map;
 
@@ -100,7 +101,7 @@ impl Position {
         } //up-left
         positions
     }
-    fn get_offset(&mut self, row_offset: isize, col_offset: isize) -> Option<Position> {
+    fn get_offset(&self, row_offset: isize, col_offset: isize) -> Option<Position> {
         let new_row = if row_offset < 0 {
             let row_offset = row_offset.abs() as usize;
             self.row - row_offset
@@ -124,7 +125,7 @@ impl Position {
             })
         }
     }
-    fn get_offsets(&mut self, offsets: Vec<(isize, isize)>) -> Vec<Position> {
+    fn get_offsets(&self, offsets: Vec<(isize, isize)>) -> Vec<Position> {
         let mut positions: Vec<Position> = Vec::new();
         for (row_offset, col_offset) in offsets {
             if let Some(pos) = self.get_offset(row_offset, col_offset) {
@@ -133,7 +134,7 @@ impl Position {
         }
         positions
     }
-    fn get_adjacents(&mut self) -> Vec<Position> {
+    fn get_adjacents(&self) -> Vec<Position> {
         let offsets = vec![
             (1, 0),
             (0, 1),
@@ -146,6 +147,33 @@ impl Position {
         ];
         self.get_offsets(offsets)
     }
+
+    fn get_knight_moves(&self) -> Vec<Position> {
+        let offsets = vec![
+            (2, 1),
+            (1, 2),
+            (-2, 1),
+            (-1, 2),
+            (-2, -1),
+            (-1, -2),
+            (2, -1),
+            (1, -2),
+        ];
+        self.get_offsets(offsets)
+    }
+
+    fn push_if_occupied(vec: &mut Vec<Position>, new_pos: Position, board: &Board) {
+        if let Some(_) = board.get(&new_pos) {
+            vec.push(new_pos)
+        }
+    }
+}
+
+fn push_if_exists<T>(vec: &mut Vec<T>, new_obj: Option<T>) {
+    match new_obj {
+        Some(t) => vec.push(t),
+        None => (),
+    }
 }
 
 type Board = HashMap<Position, Option<Piece>>;
@@ -157,10 +185,81 @@ struct Piece {
     side: Side,
     piece_type: PieceType,
     current_pos: Position,
+    has_moved: bool,
 }
 
 impl Piece {
-    fn can_move_to(&self, to_pos: Position, board: &Board) -> bool {}
+    fn get_valid_moves(&self, board: &Board) -> Vec<Position> {
+        let moves = match self.piece_type {
+            PieceType::King => {
+                let mut mvs = self.current_pos.get_adjacents();
+                mvs.append(&mut self.get_available_castle_moves(board));
+                mvs
+            }
+            PieceType::Queen => {
+                let mut mvs = self.current_pos.get_horizontal();
+                mvs.append(&mut self.current_pos.get_vertical());
+                mvs.append(&mut self.current_pos.get_diagonals());
+                mvs
+            }
+
+            PieceType::Rook => {
+                let mut mvs = self.current_pos.get_horizontal();
+                mvs.append(&mut self.current_pos.get_vertical());
+                mvs
+            }
+            PieceType::Bishop => self.current_pos.get_diagonals(),
+            PieceType::Knight => self.current_pos.get_knight_moves(),
+            PieceType::Pawn => self.get_pawn_moves(board),
+        };
+        self.filter_blocked_moves(board, moves)
+    }
+    fn filter_check_moves(&self, board: &Board, moves: Vec<Position>) -> Vec<Position> {
+        moves //TODO: This
+    }
+    fn filter_blocked_moves(&self, board: &Board, moves: Vec<Position>) -> Vec<Position> {
+        moves
+    }
+
+    fn get_available_castle_moves(&self, board: &Board) -> Vec<Position> {
+        Vec::new()
+    }
+    fn can_move_to(&self, to_pos: Position, board: &Board) -> bool {
+        self.get_valid_moves(board).contains(&to_pos)
+    }
+
+    fn get_pawn_moves(&self, board: &Board) -> Vec<Position> {
+        let mut positions: Vec<Position> = Vec::new();
+        match self.side {
+            Side::White => {
+                if !self.has_moved {
+                    positions.append(&mut self.current_pos.get_offsets(vec![(0, 2)]));
+                };
+                positions.append(&mut self.current_pos.get_offsets(vec![(0, 1)]));
+                if let Some(up_left) = self.current_pos.get_offset(-1, 1) {
+                    Position::push_if_occupied(&mut positions, up_left, board)
+                }
+                if let Some(up_right) = self.current_pos.get_offset(1, 1) {
+                    Position::push_if_occupied(&mut positions, up_right, board)
+                }
+                positions
+            }
+            Side::Black => {
+                if !self.has_moved {
+                    positions.append(&mut self.current_pos.get_offsets(vec![(0, -2)]));
+                };
+                positions.append(&mut self.current_pos.get_offsets(vec![(0, -1)]));
+
+                if let Some(down_left) = self.current_pos.get_offset(-1, -1) {
+                    Position::push_if_occupied(&mut positions, down_left, board)
+                }
+                if let Some(down_right) = self.current_pos.get_offset(1, -1) {
+                    Position::push_if_occupied(&mut positions, down_right, board)
+                }
+                positions
+            }
+        }
+    }
 }
 
 enum PieceType {
@@ -171,26 +270,7 @@ enum PieceType {
     Knight,
     Pawn,
 }
-impl PieceType {
-    fn get_valid_moves(&self, from_pos: Position, board: &Board) -> Vec<Position> {
-        let moves = match self {
-            PieceType::King => {}
-            PieceType::Queen => todo!(),
-            PieceType::Rook => todo!(),
-            PieceType::Bishop => todo!(),
-            PieceType::Knight => todo!(),
-            PieceType::Pawn => todo!(),
-        };
-        let moves = self.filter_check_moves(board, moves);
-        self.filter_blocked_moves(board, moves)
-    }
-    fn filter_check_moves(&self, board: &Board, moves: Vec<Position>) -> Vec<Position> {
-        moves //TODO: This
-    }
-    fn filter_blocked_moves(&self, board: &Board, moves: Vec<Position>) -> Vec<Position> {
-        moves
-    }
-}
+impl PieceType {}
 
 pub fn init_model(send: Sender<ControlMsg>, recv: Receiver<ControlMsg>) {
     let game = Model::new(send, recv);
