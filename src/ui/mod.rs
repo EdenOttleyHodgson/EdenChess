@@ -6,17 +6,17 @@ use std::{
 use eframe::egui;
 use log::{error, info};
 
-use crate::control::ControlMsg;
+use crate::control::{ModelMsg, UiMsg};
 
 struct EdenChessUI {
-    model_sender: Sender<ControlMsg>,
-    model_reciever: Receiver<ControlMsg>,
+    model_sender: Sender<UiMsg>,
+    model_reciever: Receiver<ModelMsg>,
 }
 impl EdenChessUI {
     fn new(
         cc: &eframe::CreationContext<'_>,
-        send: Sender<ControlMsg>,
-        recv: Receiver<ControlMsg>,
+        send: Sender<UiMsg>,
+        recv: Receiver<ModelMsg>,
     ) -> Self {
         EdenChessUI {
             model_sender: send,
@@ -29,7 +29,7 @@ impl eframe::App for EdenChessUI {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.label("Hello world!");
             if ui.button("Click Me").clicked() {
-                if let Err(e) = self.model_sender.send(ControlMsg::Debug) {
+                if let Err(e) = self.model_sender.send(UiMsg::Debug("Clicked!")) {
                     error!("{}", e);
                 };
             }
@@ -37,7 +37,7 @@ impl eframe::App for EdenChessUI {
     }
 }
 
-pub fn init_ui(send: Sender<ControlMsg>, recv: Receiver<ControlMsg>) {
+pub fn init_ui(send: Sender<UiMsg>, recv: Receiver<ModelMsg>) {
     let native_options = eframe::NativeOptions::default();
     info!("Glog");
     eframe::run_native(

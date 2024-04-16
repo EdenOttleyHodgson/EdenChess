@@ -168,6 +168,7 @@ impl Position {
         positions
     }
 }
+#[derive(Clone, Copy)]
 pub enum Direction {
     North,
     NorthEast,
@@ -237,10 +238,15 @@ pub fn push_if_exists<T>(vec: &mut Vec<T>, new_obj: Option<T>) {
 pub enum UiMsg {
     Debug(&'static str),
     CheckValidMove((Position, Position)),
+    GetValidMoves(Position),
+    MakeMove((Position, Position)),
     Quit,
 }
 
 #[derive(Debug)]
+
 pub enum ModelMsg {
     Debug(&'static str),
+    MoveIsValid((Position, Position)),
+    Moves(Position, Vec<Position>),
 }
