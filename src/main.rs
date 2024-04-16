@@ -4,16 +4,14 @@ use derive_more::Display;
 use env_logger::Env;
 use ui::init_ui;
 
+mod control;
 mod model;
 mod ui;
 
 use log::*;
 
 use crate::model::init_model;
-#[derive(Debug, Display)]
-pub enum ControlMsg {
-    Debug,
-}
+
 fn main() {
     let log_env = Env::default().filter_or("debug", "debug");
     env_logger::init_from_env(log_env);

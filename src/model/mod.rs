@@ -1,32 +1,48 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     default,
     iter::zip,
     sync::mpsc::{Receiver, Sender},
     usize,
 };
 
-use egui::accesskit::VerticalOffset;
 use log::{error, info};
 use std::collections::hash_map;
 
-use crate::ControlMsg;
+use crate::control::*;
 
 struct Model {
-    ui_sender: Sender<ControlMsg>,
-    ui_reciever: Receiver<ControlMsg>,
+    ui_sender: Sender<ModelMsg>,
+    ui_reciever: Receiver<UiMsg>,
     game: Game,
 }
 impl Model {
-    fn new(send: Sender<ControlMsg>, recv: Receiver<ControlMsg>) -> Self {
+    fn new(send: Sender<ModelMsg>, recv: Receiver<UiMsg>) -> Self {
         Model {
             ui_sender: send,
             ui_reciever: recv,
             game: Game::new(),
         }
     }
+    fn model_loop(&self) {
+        loop {
+            match self.ui_reciever.recv() {
+                Ok(m) => {
+                    if let UiMsg::Quit = m {
+                        break;
+                    }
+                    self.handle_message(m)
+                }
+                Err(e) => {
+                    error!("{}", e);
+                    break;
+                }
+            }
+        }
+    }
+    fn handle_message(&self, msg: UiMsg) {}
 }
 
 struct Game {
@@ -54,126 +70,25 @@ impl Game {
             which_turn: Side::White,
         }
     }
+    fn get_all_pieces_in(board: &Board, positions: Vec<Position>) -> Vec<&Piece> {
+        let mut pieces: Vec<&Piece> = Vec::new();
+        for pos in positions {
+            if let Some(x) = board.get(&pos) {
+                if let Some(piece) = x {
+                    pieces.push(piece)
+                }
+            } else {
+                error!("Position out of bounds!")
+            }
+        }
+        pieces
+    }
 }
 
+#[derive(PartialEq, Eq)]
 enum Side {
     White,
     Black,
-}
-
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-struct Position {
-    col: char,
-    row: usize,
-}
-impl Position {
-    fn get_vertical(&self) -> Vec<Position> {
-        let mut positions: Vec<Position> = Vec::new();
-        for row in 1..=8 {
-            positions.push(Position { col: self.col, row });
-        }
-        positions
-    }
-    fn get_horizontal(&self) -> Vec<Position> {
-        let mut positions: Vec<Position> = Vec::new();
-        for col in 'a'..='e' {
-            positions.push(Position { col, row: self.row });
-        }
-        positions
-    }
-    fn get_diagonals(&self) -> Vec<Position> {
-        let mut positions: Vec<Position> = Vec::new();
-
-        for (col, row) in zip(self.col..='e', self.row..=8) {
-            positions.push(Position { col, row });
-        } //up-right diagonal
-
-        for (col, row) in zip(self.col..='a', 1..=self.row) {
-            positions.push(Position { col, row });
-        } //down-right
-
-        for (col, row) in zip('a'..=self.col, 1..=self.row) {
-            positions.push(Position { col, row });
-        } //down-left
-
-        for (col, row) in zip('a'..=self.col, self.row..=8) {
-            positions.push(Position { col, row });
-        } //up-left
-        positions
-    }
-    fn get_offset(&self, row_offset: isize, col_offset: isize) -> Option<Position> {
-        let new_row = if row_offset < 0 {
-            let row_offset = row_offset.abs() as usize;
-            self.row - row_offset
-        } else {
-            self.row - row_offset as usize
-        };
-
-        let new_col = if col_offset < 0 {
-            let col_offset = row_offset.abs() as u8;
-            (self.col as u8 - col_offset) as char
-        } else {
-            (self.col as u8 + col_offset as u8) as char
-        };
-
-        if new_col < 'a' || new_col > 'e' || new_row > 8 || new_row < 1 {
-            None
-        } else {
-            Some(Position {
-                row: new_row,
-                col: new_col,
-            })
-        }
-    }
-    fn get_offsets(&self, offsets: Vec<(isize, isize)>) -> Vec<Position> {
-        let mut positions: Vec<Position> = Vec::new();
-        for (row_offset, col_offset) in offsets {
-            if let Some(pos) = self.get_offset(row_offset, col_offset) {
-                positions.push(pos);
-            }
-        }
-        positions
-    }
-    fn get_adjacents(&self) -> Vec<Position> {
-        let offsets = vec![
-            (1, 0),
-            (0, 1),
-            (1, 1),
-            (-1, 0),
-            (0, -1),
-            (-1, -1),
-            (-1, 1),
-            (1, -1),
-        ];
-        self.get_offsets(offsets)
-    }
-
-    fn get_knight_moves(&self) -> Vec<Position> {
-        let offsets = vec![
-            (2, 1),
-            (1, 2),
-            (-2, 1),
-            (-1, 2),
-            (-2, -1),
-            (-1, -2),
-            (2, -1),
-            (1, -2),
-        ];
-        self.get_offsets(offsets)
-    }
-
-    fn push_if_occupied(vec: &mut Vec<Position>, new_pos: Position, board: &Board) {
-        if let Some(_) = board.get(&new_pos) {
-            vec.push(new_pos)
-        }
-    }
-}
-
-fn push_if_exists<T>(vec: &mut Vec<T>, new_obj: Option<T>) {
-    match new_obj {
-        Some(t) => vec.push(t),
-        None => (),
-    }
 }
 
 type Board = HashMap<Position, Option<Piece>>;
@@ -181,7 +96,7 @@ type Board = HashMap<Position, Option<Piece>>;
 #[derive(Default)]
 struct ChessTimer {}
 
-struct Piece {
+pub struct Piece {
     side: Side,
     piece_type: PieceType,
     current_pos: Position,
@@ -214,13 +129,120 @@ impl Piece {
         };
         self.filter_blocked_moves(board, moves)
     }
-    fn filter_check_moves(&self, board: &Board, moves: Vec<Position>) -> Vec<Position> {
-        moves //TODO: This
-    }
-    fn filter_blocked_moves(&self, board: &Board, moves: Vec<Position>) -> Vec<Position> {
-        moves
-    }
+    fn filter_blocked_moves(&self, board: &Board, mut moves: Vec<Position>) -> Vec<Position> {
+        let pieces = Game::get_all_pieces_in(board, moves);
+        let friendly_piece_positions: Vec<Position> = pieces
+            .iter()
+            .filter(|x| x.side == self.side)
+            .map(|x| x.current_pos)
+            .collect();
 
+        match self.piece_type {
+            PieceType::Queen => {
+                //get all pieces
+                //remove all squares beyond piece
+
+                let north_blocked: Vec<Position> = blocked_in(pieces, Direction::North);
+
+                let east_blocked: Vec<Position> = blocked_in(pieces, Direction::East);
+
+                let south_blocked: Vec<Position> = blocked_in(pieces, Direction::South);
+
+                let west_blocked: Vec<Position> = blocked_in(pieces, Direction::West);
+
+                let north_west_blocked: Vec<Position> = blocked_in(pieces, Direction::NorthWest);
+
+                let north_east_blocked: Vec<Position> = blocked_in(pieces, Direction::NorthEast);
+
+                let south_east_blocked: Vec<Position> = blocked_in(pieces, Direction::SouthEast);
+
+                let south_west_blocked: Vec<Position> = blocked_in(pieces, Direction::SouthWest);
+
+                let moves_to_remove: HashSet<&Position> = [
+                    north_blocked,
+                    north_east_blocked,
+                    east_blocked,
+                    south_east_blocked,
+                    south_blocked,
+                    south_west_blocked,
+                    west_blocked,
+                    north_east_blocked,
+                    friendly_piece_positions,
+                ]
+                .concat()
+                .iter()
+                .collect();
+
+                moves.retain(|m| !moves_to_remove.contains(m));
+                moves
+            }
+            PieceType::Rook => {
+                let pieces = Game::get_all_pieces_in(board, moves);
+
+                let north_blocked: Vec<Position> = blocked_in(pieces, Direction::North);
+
+                let east_blocked: Vec<Position> = blocked_in(pieces, Direction::East);
+
+                let south_blocked: Vec<Position> = blocked_in(pieces, Direction::South);
+
+                let west_blocked: Vec<Position> = blocked_in(pieces, Direction::West);
+
+                let moves_to_remove: HashSet<&Position> = [
+                    north_blocked,
+                    east_blocked,
+                    south_blocked,
+                    west_blocked,
+                    friendly_piece_positions,
+                ]
+                .concat()
+                .iter()
+                .collect();
+
+                moves.retain(|m| !moves_to_remove.contains(m));
+                moves
+            }
+            PieceType::Bishop => {
+                let pieces = Game::get_all_pieces_in(board, moves);
+
+                let north_west_blocked: Vec<Position> = blocked_in(pieces, Direction::NorthWest);
+
+                let north_east_blocked: Vec<Position> = blocked_in(pieces, Direction::NorthEast);
+
+                let south_east_blocked: Vec<Position> = blocked_in(pieces, Direction::SouthEast);
+
+                let south_west_blocked: Vec<Position> = blocked_in(pieces, Direction::SouthWest);
+
+                let moves_to_remove: HashSet<&Position> = [
+                    north_east_blocked,
+                    south_east_blocked,
+                    south_west_blocked,
+                    north_east_blocked,
+                    friendly_piece_positions,
+                ]
+                .concat()
+                .iter()
+                .collect();
+
+                moves.retain(|m| !moves_to_remove.contains(m));
+                moves
+            }
+            PieceType::Pawn => {
+                let pieces = Game::get_all_pieces_in(board, moves);
+                let occupied: HashSet<Position> = pieces.iter().map(|x| x.current_pos).collect();
+                let mut vert_moves = match self.side {
+                    Side::White => self.current_pos.get_offsets(vec![(0, 1), (0, 2)]),
+                    Side::Black => self.current_pos.get_offsets(vec![(0, -1), (0, -2)]),
+                };
+                vert_moves.retain(|x| !occupied.contains(x));
+                moves.retain(|x| vert_moves.contains(x));
+                moves
+            }
+            _ => {
+                moves.retain(|x| !friendly_piece_positions.contains(x));
+                moves
+            }
+        }
+    }
     fn get_available_castle_moves(&self, board: &Board) -> Vec<Position> {
         Vec::new()
     }
@@ -262,6 +284,13 @@ impl Piece {
     }
 }
 
+fn blocked_in(pieces: Vec<&Piece>, dir: Direction) -> Vec<Position> {
+    pieces
+        .iter()
+        .flat_map(|p| p.current_pos.beyond(dir))
+        .collect()
+}
+
 enum PieceType {
     King,
     Queen,
@@ -272,12 +301,12 @@ enum PieceType {
 }
 impl PieceType {}
 
-pub fn init_model(send: Sender<ControlMsg>, recv: Receiver<ControlMsg>) {
+pub fn init_model(send: Sender<ModelMsg>, recv: Receiver<UiMsg>) {
     let game = Model::new(send, recv);
-    if let Err(e) = game.ui_sender.send(ControlMsg::Debug) {
+    if let Err(e) = game.ui_sender.send(ModelMsg::Debug("Started")) {
         error!("{}", e)
     };
     while let Ok(msg) = game.ui_reciever.recv() {
-        info!("Msg recieved: {}", msg)
+        info!("Msg recieved: {:?}", msg)
     }
 }

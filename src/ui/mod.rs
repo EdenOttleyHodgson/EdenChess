@@ -6,7 +6,7 @@ use std::{
 use eframe::egui;
 use log::{error, info};
 
-use crate::ControlMsg;
+use crate::control::ControlMsg;
 
 struct EdenChessUI {
     model_sender: Sender<ControlMsg>,
