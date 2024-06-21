@@ -81,9 +81,6 @@ impl EdenChessUi {
                 if let Some(ms) = &self.valid_moves {
                     ms
                 } else {
-                    if !self.waiting_for_moves {
-                        let _ = self.send.send(UiMsg::GetValidMoves(p));
-                    }
                     &Vec::<CBPosition>::new()
                 }
             } else {
@@ -137,7 +134,8 @@ impl EdenChessUi {
                             error!("Space pressed while waiting for moves?");
                         }
                     } else {
-                        self.square_selected = Some(self.cursor)
+                        self.square_selected = Some(self.cursor);
+                        let _ = self.send.send(UiMsg::GetValidMoves(self.cursor));
                     }
                     self.reset_valid_positions();
                 }
