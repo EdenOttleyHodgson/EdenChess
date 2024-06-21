@@ -1,48 +1,172 @@
 use std::{
-    default,
+    collections::HashMap,
+    io::{self, Result},
     sync::mpsc::{Receiver, Sender},
+    time::Duration,
 };
 
-use eframe::egui;
-use log::{error, info};
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+};
+use log::*;
 
-use crate::control::{ModelMsg, UiMsg};
+use crate::{
+    control::{CBPosition, ModelMsg, UiMsg},
+    model::Board,
+};
+use ratatui::{
+    prelude::*,
+    widgets::{Block, Padding, Paragraph},
+};
 
-struct EdenChessUI {
-    model_sender: Sender<UiMsg>,
-    model_reciever: Receiver<ModelMsg>,
+use self::chessboard::Chessboard;
+mod chessboard;
+pub mod tui;
+
+pub fn init_ui(send: Sender<UiMsg>, recv: Receiver<ModelMsg>) -> io::Result<()> {
+    let mut terminal = tui::init()?;
+    let mut eden_chess_ui = EdenChessUi {
+        send,
+        recv,
+        exit: false,
+        board: None,
+        cursor: CBPosition { col: 'a', row: 1 },
+        square_selected: None,
+        valid_moves: None,
+        waiting_for_moves: false,
+    };
+    eden_chess_ui.run(&mut terminal)?;
+    tui::restore()?;
+    Ok(())
 }
-impl EdenChessUI {
-    fn new(
-        cc: &eframe::CreationContext<'_>,
-        send: Sender<UiMsg>,
-        recv: Receiver<ModelMsg>,
-    ) -> Self {
-        EdenChessUI {
-            model_sender: send,
-            model_reciever: recv,
+
+struct EdenChessUi {
+    send: Sender<UiMsg>,
+    recv: Receiver<ModelMsg>,
+    exit: bool,
+    board: Option<Board>,
+    cursor: CBPosition,
+    square_selected: Option<CBPosition>,
+    waiting_for_moves: bool,
+    valid_moves: Option<Vec<CBPosition>>,
+}
+
+impl EdenChessUi {
+    pub fn run(&mut self, terminal: &mut tui::Tui) -> io::Result<()> {
+        let _ = self.send.send(UiMsg::GetBoardState);
+        while !self.exit {
+            let _ = self.send.send(UiMsg::GetBoardState);
+            terminal.draw(|frame| self.render_frame(frame))?;
+            self.handle_model_events();
+            self.handle_events()?;
+        }
+        info!("Exiting");
+        Ok(())
+    }
+
+    fn render_frame(&self, frame: &mut Frame) {
+        if let Some(b) = &self.board {
+            let block = Block::new().padding(Padding::symmetric(
+                (frame.size().width as f32 * 0.05).floor() as u16,
+                (frame.size().height as f32 * 0.05).floor() as u16,
+            ));
+            let layout = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints(vec![Constraint::Percentage(60), Constraint::Percentage(40)])
+                .split(block.inner(frame.size()));
+            let left_panel = layout[0];
+            let right_panel = layout[1];
+            let valid_moves = if let Some(p) = self.square_selected {
+                if let Some(ms) = &self.valid_moves {
+                    ms
+                } else {
+                    if !self.waiting_for_moves {
+                        let _ = self.send.send(UiMsg::GetValidMoves(p));
+                    }
+                    &Vec::<CBPosition>::new()
+                }
+            } else {
+                &Vec::<CBPosition>::new()
+            };
+            let ui_board = Chessboard::new(&b, self.cursor, valid_moves);
+            frame.render_widget(ui_board, left_panel);
         }
     }
-}
-impl eframe::App for EdenChessUI {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("Hello world!");
-            if ui.button("Click Me").clicked() {
-                if let Err(e) = self.model_sender.send(UiMsg::Debug("Clicked!")) {
-                    error!("{}", e);
-                };
-            }
-        });
-    }
-}
 
-pub fn init_ui(send: Sender<UiMsg>, recv: Receiver<ModelMsg>) {
-    let native_options = eframe::NativeOptions::default();
-    info!("Glog");
-    eframe::run_native(
-        "Eden Chess",
-        native_options,
-        Box::new(|cc| Box::new(EdenChessUI::new(cc, send, recv))),
-    );
+    fn handle_events(&mut self) -> io::Result<()> {
+        match event::poll(Duration::from_secs(0))? {
+            true => match event::read() {
+                Ok(e) => match e {
+                    Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                        self.handle_key_event(key_event)
+                    }
+                    _ => {}
+                },
+                Err(e) => error!("{}", e),
+            },
+            false => {} // it's important to check that the event is a key press event as
+                        // crossterm also emits key release and repeat events on Windows.
+        };
+        Ok(())
+    }
+    //
+
+    fn handle_key_event(&mut self, e: KeyEvent) {
+        match e.code {
+            KeyCode::Char('q') => self.exit = true,
+            KeyCode::Left => self.cursor.move_cursor_left(),
+            KeyCode::Right => self.cursor.move_cursor_right(),
+            KeyCode::Up => self.cursor.move_cursor_up(),
+            KeyCode::Down => self.cursor.move_cursor_down(),
+            KeyCode::Char(' ') => {
+                if !self.waiting_for_moves {
+                    if let Some(selected_pos) = self.square_selected {
+                        if let Some(valids) = &self.valid_moves {
+                            if selected_pos != self.cursor && valids.contains(&self.cursor) {
+                                if let Err(e) =
+                                    self.send.send(UiMsg::MakeMove((selected_pos, self.cursor)))
+                                {
+                                    error!("{}", e)
+                                };
+
+                                //do the mov
+                            }
+                            self.square_selected = None;
+                        } else {
+                            error!("Space pressed while waiting for moves?");
+                        }
+                    } else {
+                        self.square_selected = Some(self.cursor)
+                    }
+                    self.reset_valid_positions();
+                }
+            }
+            KeyCode::Esc => {
+                self.square_selected = None;
+                self.reset_valid_positions();
+            }
+
+            _ => {}
+        };
+    }
+
+    fn handle_model_events(&mut self) {
+        match self.recv.try_recv() {
+            Ok(msg) => match msg {
+                ModelMsg::Debug(d) => debug!("{}", d),
+                ModelMsg::MoveIsValid(x) => (),
+                ModelMsg::Moves(ms) => self.valid_moves = Some(ms),
+                ModelMsg::BoardState(b) => self.board = Some(b),
+            },
+            Err(e) => match e {
+                std::sync::mpsc::TryRecvError::Empty => {}
+                std::sync::mpsc::TryRecvError::Disconnected => error!("{}", e),
+            },
+        }
+    }
+    fn reset_valid_positions(&mut self) {
+        self.valid_moves = None;
+        self.waiting_for_moves = false;
+    }
 }

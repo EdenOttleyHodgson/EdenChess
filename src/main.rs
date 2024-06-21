@@ -1,7 +1,7 @@
-use std::{sync::mpsc::channel, thread};
+use std::{io, sync::mpsc::channel, thread};
 
 use derive_more::Display;
-use env_logger::Env;
+use flexi_logger::{FileSpec, Logger, WriteMode};
 use ui::init_ui;
 
 mod control;
@@ -12,15 +12,25 @@ use log::*;
 
 use crate::model::init_model;
 
-fn main() {
-    let log_env = Env::default().filter_or("debug", "debug");
-    env_logger::init_from_env(log_env);
+fn main() -> io::Result<()> {
+    std::process::Command::new("rm")
+        .args(["*.log"])
+        .output()
+        .expect("Failed to execute process");
+    let _logger = Logger::try_with_str("debug")
+        .unwrap()
+        .log_to_file(FileSpec::default())
+        .write_mode(WriteMode::BufferAndFlush)
+        .start()
+        .unwrap();
+
     debug!("Debug lgo");
     let (ui_send, model_recv) = channel();
     let (model_send, ui_recv) = channel();
 
-    let model_thread_handle = thread::spawn(move || {
+    let _ = thread::spawn(move || {
         init_model(ui_send, ui_recv);
     });
-    init_ui(model_send, model_recv);
+    ui::init_ui(model_send, model_recv)?;
+    Ok(())
 }

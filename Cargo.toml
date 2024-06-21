@@ -7,7 +7,10 @@ edition = "2021"
 
 [dependencies]
 derive_more = "0.99.17"
-eframe = "0.27.2"
-egui = "0.27.2"
-env_logger = "0.11.3"
 log = "0.4.21"
+ratatui = "0.26.2"
+crossterm = "0.27.0"
+lazy_static = "1.4.0"
+color-eyre = "0.6.3"
+flexi_logger = "0.28.0"
+
