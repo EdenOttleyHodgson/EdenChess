@@ -71,6 +71,7 @@ impl Model {
                         .expect("already checked")
                         .expect("already checked"); //Evil
                     from_piece.current_pos = to;
+                    from_piece.has_moved = true;
                     self.game.board.insert(to, Some(from_piece));
                 } else {
                     warn!("No piece at from pos despite move request")
@@ -154,6 +155,12 @@ impl Side {
         match self {
             Side::White => ratatui::style::Color::White,
             Side::Black => ratatui::style::Color::Black,
+        }
+    }
+    pub fn flip(&mut self) {
+        match self {
+            Side::White => *self = Side::Black,
+            Side::Black => *self = Side::White,
         }
     }
 }
@@ -413,10 +420,17 @@ impl Piece {
                 let pieces = Game::get_all_pieces_in(board, &moves);
                 let occupied: HashSet<CBPosition> = pieces.iter().map(|x| x.current_pos).collect();
                 debug!("occupied {:?}", occupied);
-                let mut vert_moves = match self.side {
-                    Side::White => self.current_pos.get_offsets(vec![(1, 0), (2, 0)]),
-                    Side::Black => self.current_pos.get_offsets(vec![(-1, 0), (-2, 0)]),
+                let offsets = if self.has_moved {
+                    vec![(1, 0)]
+                } else {
+                    vec![(1, 0), (2, 0)]
                 };
+                let offsets = match self.side {
+                    Side::White => offsets,
+                    Side::Black => offsets.iter().map(|x| (x.0 * -1, x.1)).collect(),
+                };
+
+                let mut vert_moves = self.current_pos.get_offsets(offsets);
                 vert_moves.retain(|x| !occupied.contains(x));
                 debug!(
                     "pre retain moves: {:?}, vert_moves: {:?}",

@@ -13,7 +13,7 @@ use log::*;
 
 use crate::{
     control::{CBPosition, ModelMsg, UiMsg},
-    model::Board,
+    model::{Board, Side},
 };
 use ratatui::{
     prelude::*,
@@ -34,7 +34,7 @@ pub fn init_ui(send: Sender<UiMsg>, recv: Receiver<ModelMsg>) -> io::Result<()> 
         cursor: CBPosition { col: 'a', row: 1 },
         square_selected: None,
         valid_moves: None,
-        waiting_for_moves: false,
+        which_turn: Side::White,
     };
     eden_chess_ui.run(&mut terminal)?;
     tui::restore()?;
@@ -48,8 +48,8 @@ struct EdenChessUi {
     board: Option<Board>,
     cursor: CBPosition,
     square_selected: Option<CBPosition>,
-    waiting_for_moves: bool,
     valid_moves: Option<Vec<CBPosition>>,
+    which_turn: Side,
 }
 
 impl EdenChessUi {
@@ -117,28 +117,7 @@ impl EdenChessUi {
             KeyCode::Up => self.cursor.move_cursor_up(),
             KeyCode::Down => self.cursor.move_cursor_down(),
             KeyCode::Char(' ') => {
-                if !self.waiting_for_moves {
-                    if let Some(selected_pos) = self.square_selected {
-                        if let Some(valids) = &self.valid_moves {
-                            if selected_pos != self.cursor && valids.contains(&self.cursor) {
-                                if let Err(e) =
-                                    self.send.send(UiMsg::MakeMove((selected_pos, self.cursor)))
-                                {
-                                    error!("{}", e)
-                                };
-
-                                //do the mov
-                            }
-                            self.square_selected = None;
-                        } else {
-                            error!("Space pressed while waiting for moves?");
-                        }
-                    } else {
-                        self.square_selected = Some(self.cursor);
-                        let _ = self.send.send(UiMsg::GetValidMoves(self.cursor));
-                    }
-                    self.reset_valid_positions();
-                }
+                self.handle_space_pressed();
             }
             KeyCode::Esc => {
                 self.square_selected = None;
@@ -147,6 +126,34 @@ impl EdenChessUi {
 
             _ => {}
         };
+    }
+
+    fn handle_space_pressed(&mut self) {
+        if let Some(selected_pos) = self.square_selected {
+            if let Some(valids) = &self.valid_moves {
+                if selected_pos != self.cursor && valids.contains(&self.cursor) {
+                    if let Err(e) = self.send.send(UiMsg::MakeMove((selected_pos, self.cursor))) {
+                        error!("{}", e)
+                    } else {
+                        self.which_turn.flip();
+                    };
+                }
+                self.square_selected = None;
+            }
+        } else {
+            if let Some(board) = &self.board {
+                if let Some(piece_under_cursor) = board
+                    .get(&self.cursor)
+                    .expect("Cursor should be within bounds")
+                {
+                    if piece_under_cursor.side == self.which_turn {
+                        self.square_selected = Some(self.cursor);
+                        let _ = self.send.send(UiMsg::GetValidMoves(self.cursor));
+                    }
+                }
+            }
+        }
+        self.reset_valid_positions();
     }
 
     fn handle_model_events(&mut self) {
@@ -165,6 +172,5 @@ impl EdenChessUi {
     }
     fn reset_valid_positions(&mut self) {
         self.valid_moves = None;
-        self.waiting_for_moves = false;
     }
 }
