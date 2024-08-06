@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
     collections::HashMap,
     fmt::{Debug, Write},
@@ -9,7 +10,7 @@ use std::{
 use log::{debug, warn};
 use ratatui::layout::Positions;
 
-use crate::model::Piece;
+use crate::model::{Piece, Side};
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct CBPosition {
@@ -69,10 +70,10 @@ impl CBPosition {
         };
 
         if new_col < 'a' || new_col > 'h' || new_row > 8 || new_row < 1 {
-            debug!(
-                "Returning none from get offset, origin:{:?}, offset:{},{}, new_col:{}, new_row:{}",
-                self, row_offset, col_offset, new_col, new_row
-            );
+            // debug!(
+            //     "Returning none from get offset, origin:{:?}, offset:{},{}, new_col:{}, new_row:{}",
+            //     self, row_offset, col_offset, new_col, new_row
+            // );
             None
         } else {
             Some(CBPosition {
@@ -88,7 +89,7 @@ impl CBPosition {
                 positions.push(pos);
             }
         }
-        debug!("offsets: {:?} -> positions: {:?}", offsets, positions);
+        // debug!("offsets: {:?} -> positions: {:?}", offsets, positions);
         positions
     }
     pub fn get_adjacents(&self) -> Vec<CBPosition> {
@@ -117,7 +118,6 @@ impl CBPosition {
             (-2, 1),
         ];
         let r = self.get_offsets(offsets);
-        debug!("result of get knight moves: {:?}", r);
         r
     }
 
@@ -282,6 +282,29 @@ impl Add for CBPosition {
         Some(CBPosition { col, row })
     }
 }
+impl From<(char, usize)> for CBPosition {
+    fn from((col, row): (char, usize)) -> Self {
+        CBPosition { col, row }
+    }
+}
+impl From<&'static str> for CBPosition {
+    fn from(value: &'static str) -> Self {
+        if value.len() != 2 {
+            panic!("String is not the correct length!")
+        }
+        let chars: Vec<char> = value.chars().collect();
+        let col = chars[0];
+        let row: usize =
+            str::parse::<usize>(&chars[1].to_string()).expect("second char should be a number!");
+        if col < 'a' || col > 'h' {
+            panic!("Col should be between a and h!")
+        }
+        if row < 1 || row > 8 {
+            panic!("row should be between 1 and 8!")
+        }
+        CBPosition { col, row }
+    }
+}
 // impl PartialOrd for CBPosition {
 //     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
 //         let self_magnitude = (((self.col as usize) ^ 2 + (self.row ^ 2)) as f32).sqrt();
@@ -381,9 +404,45 @@ pub enum UiMsg {
 #[derive(Debug)]
 pub enum ModelMsg {
     Debug(&'static str),
-    MoveIsValid((CBPosition, CBPosition)),
+    MoveIsInvalid,
     Moves(Vec<CBPosition>),
     BoardState(Board),
+    Checkmate(Side),
+    Stalemate,
+}
+impl PartialEq for ModelMsg {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            ModelMsg::Debug(_) => match other {
+                ModelMsg::Debug(_) => true,
+                _ => false,
+            },
+            ModelMsg::MoveIsInvalid => match other {
+                ModelMsg::MoveIsInvalid => true,
+                _ => false,
+            },
+
+            ModelMsg::Moves(_) => match other {
+                ModelMsg::Moves(_) => true,
+                _ => false,
+            },
+
+            ModelMsg::BoardState(_) => match other {
+                ModelMsg::BoardState(_) => true,
+                _ => false,
+            },
+
+            ModelMsg::Checkmate(s1) => match other {
+                ModelMsg::Checkmate(s2) => s1 == s2,
+                _ => false,
+            },
+
+            ModelMsg::Stalemate => match other {
+                ModelMsg::Stalemate => true,
+                _ => false,
+            },
+        }
+    }
 }
 
 pub fn char_add(c: char, i: u8) -> char {
@@ -392,4 +451,16 @@ pub fn char_add(c: char, i: u8) -> char {
 
 pub fn char_sub(c: char, i: u8) -> char {
     ((c as u8) - i) as char
+}
+
+pub fn test_println(s: &str) {
+    if cfg!(test) {
+        println!("{}", s)
+    }
+}
+
+pub fn test_dbg(s: &impl Debug) {
+    if cfg!(test) {
+        dbg!(s);
+    }
 }

@@ -13,15 +13,16 @@ use log::*;
 
 use crate::{
     control::{CBPosition, ModelMsg, UiMsg},
-    model::{Board, Side},
+    model::{Board, Piece, PieceType, Side},
 };
 use ratatui::{
     prelude::*,
     widgets::{Block, Padding, Paragraph},
 };
 
-use self::chessboard::Chessboard;
+use self::{chessboard::Chessboard, infobox::Infobox};
 mod chessboard;
+mod infobox;
 pub mod tui;
 
 pub fn init_ui(send: Sender<UiMsg>, recv: Receiver<ModelMsg>) -> io::Result<()> {
@@ -34,7 +35,7 @@ pub fn init_ui(send: Sender<UiMsg>, recv: Receiver<ModelMsg>) -> io::Result<()> 
         cursor: CBPosition { col: 'a', row: 1 },
         square_selected: None,
         valid_moves: None,
-        which_turn: Side::White,
+        game_data: GameData::new(),
     };
     eden_chess_ui.run(&mut terminal)?;
     tui::restore()?;
@@ -49,9 +50,31 @@ struct EdenChessUi {
     cursor: CBPosition,
     square_selected: Option<CBPosition>,
     valid_moves: Option<Vec<CBPosition>>,
-    which_turn: Side,
+    game_data: GameData,
 }
 
+pub struct GameData {
+    pub which_turn: Side,
+    pub turn_count: usize,
+    pub move_history: Vec<String>,
+}
+impl GameData {
+    fn new() -> GameData {
+        GameData {
+            which_turn: Side::White,
+            turn_count: 0,
+            move_history: Vec::new(),
+        }
+    }
+}
+
+struct MoveRecord<'a> {
+    moving_piece: &'a Piece,
+    from_pos: CBPosition,
+    destination: CBPosition,
+    captures: bool,
+    promotes_to: Option<PieceType>,
+}
 impl EdenChessUi {
     pub fn run(&mut self, terminal: &mut tui::Tui) -> io::Result<()> {
         let _ = self.send.send(UiMsg::GetBoardState);
@@ -88,6 +111,7 @@ impl EdenChessUi {
             };
             let ui_board = Chessboard::new(&b, self.cursor, valid_moves);
             frame.render_widget(ui_board, left_panel);
+            frame.render_widget(Infobox::new(&self.game_data), right_panel)
         }
     }
 
@@ -135,7 +159,8 @@ impl EdenChessUi {
                     if let Err(e) = self.send.send(UiMsg::MakeMove((selected_pos, self.cursor))) {
                         error!("{}", e)
                     } else {
-                        self.which_turn.flip();
+                        self.game_data.turn_count += 1;
+                        self.game_data.which_turn.flip();
                     };
                 }
                 self.square_selected = None;
@@ -146,7 +171,7 @@ impl EdenChessUi {
                     .get(&self.cursor)
                     .expect("Cursor should be within bounds")
                 {
-                    if piece_under_cursor.side == self.which_turn {
+                    if piece_under_cursor.side == self.game_data.which_turn {
                         self.square_selected = Some(self.cursor);
                         let _ = self.send.send(UiMsg::GetValidMoves(self.cursor));
                     }
@@ -156,13 +181,25 @@ impl EdenChessUi {
         self.reset_valid_positions();
     }
 
+    fn add_move_to_move_history(&mut self, selected: CBPosition) {
+        if let Some(board) = &self.board {
+            if let Some(piece) = board.get(&selected).expect("Selected should be in board") {
+                let move_str = String::new();
+            } else {
+                error!("Selected place isnt occupied!")
+            }
+        };
+    }
+
     fn handle_model_events(&mut self) {
         match self.recv.try_recv() {
             Ok(msg) => match msg {
                 ModelMsg::Debug(d) => debug!("{}", d),
-                ModelMsg::MoveIsValid(x) => (),
+                ModelMsg::MoveIsInvalid => (),
                 ModelMsg::Moves(ms) => self.valid_moves = Some(ms),
                 ModelMsg::BoardState(b) => self.board = Some(b),
+                ModelMsg::Stalemate => todo!(),
+                ModelMsg::Checkmate(_) => todo!(),
             },
             Err(e) => match e {
                 std::sync::mpsc::TryRecvError::Empty => {}

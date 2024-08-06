@@ -17,13 +17,20 @@ fn main() -> io::Result<()> {
         .args(["*.log"])
         .output()
         .expect("Failed to execute process");
-    let _logger = Logger::try_with_str("debug")
-        .unwrap()
-        .log_to_file(FileSpec::default())
-        .write_mode(WriteMode::BufferAndFlush)
-        .start()
-        .unwrap();
-
+    let _logger = if cfg!(test) {
+        Logger::try_with_str("debug")
+            .unwrap()
+            .log_to_stdout()
+            .start()
+            .unwrap();
+    } else {
+        Logger::try_with_str("debug")
+            .unwrap()
+            .log_to_file(FileSpec::default())
+            .write_mode(WriteMode::BufferAndFlush)
+            .start()
+            .unwrap();
+    };
     debug!("Debug lgo");
     let (ui_send, model_recv) = channel();
     let (model_send, ui_recv) = channel();
@@ -33,4 +40,12 @@ fn main() -> io::Result<()> {
     });
     ui::init_ui(model_send, model_recv)?;
     Ok(())
+}
+
+fn test_init() {
+    Logger::try_with_str("debug")
+        .unwrap()
+        .log_to_stdout()
+        .start()
+        .unwrap();
 }
